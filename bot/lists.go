@@ -7,7 +7,7 @@ import (
 )
 
 // UpdateList will refresh a list by its ID
-func (b *Bot) UpdateList(listID string) {
+func (b *Bot) UpdateList(listID, inlineMessageID string) {
 	// Get the users
 	title, emails, err := b.Database.GetListEmails(listID)
 	if err != nil {
@@ -17,7 +17,17 @@ func (b *Bot) UpdateList(listID string) {
 	// Edit the list
 	edit := tgbotapi.EditMessageTextConfig{
 		BaseEdit: tgbotapi.BaseEdit{
-			InlineMessageID: listID,
+			InlineMessageID: inlineMessageID,
+			ReplyMarkup: &tgbotapi.InlineKeyboardMarkup{
+				InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+					{
+						{
+							Text:         "Sign me up",
+							CallbackData: &listID,
+						},
+					},
+				},
+			},
 		},
 		Text: "List of " + title + "\n" + strings.Join(emails, "\n"),
 	}
