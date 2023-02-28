@@ -28,8 +28,19 @@ func (b *Bot) Start() {
 		if update.CallbackQuery != nil {
 			fmt.Println(update.CallbackQuery)
 			// Add or remove user from list
-			// TODO: for now we only have add to list
-			_ = b.Database.AddToList(update.CallbackQuery.From.ID, update.CallbackQuery.Data)
+			err = b.Database.ParticipateOrOptOut(update.CallbackQuery.From.ID, update.CallbackQuery.Data)
+			if err != nil {
+				if err == database.NoEmailRegisteredErr {
+					_, _ = b.bot.Send(tgbotapi.CallbackConfig{
+						CallbackQueryID: update.CallbackQuery.ID,
+						Text:            "Please enter your email in bot.",
+					})
+				} else {
+					// Big fuckup
+					log.Printf("cannot process user button click: %s\n", err)
+				}
+				continue
+			}
 			// Refresh the list
 			b.UpdateList(update.CallbackQuery.Data, update.CallbackQuery.InlineMessageID)
 			// Answer it
@@ -51,7 +62,7 @@ func (b *Bot) Start() {
 			item.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
 				{
 					{
-						Text:         "Sign me up",
+						Text:         messageButtonText,
 						CallbackData: &inlineBotID,
 					},
 				},

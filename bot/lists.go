@@ -22,14 +22,15 @@ func (b *Bot) UpdateList(listID, inlineMessageID string) {
 				InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
 					{
 						{
-							Text:         "Sign me up",
+							Text:         messageButtonText,
 							CallbackData: &listID,
 						},
 					},
 				},
 			},
 		},
-		Text: "List of " + title + "\n" + strings.Join(emails, "\n"),
+		Text:      "List of " + title + "\n`" + strings.Join(emails, "\n") + "`",
+		ParseMode: "MarkdownV2",
 	}
 	_, _ = b.bot.Send(edit)
 }

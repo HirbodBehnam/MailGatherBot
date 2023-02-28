@@ -6,6 +6,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+var NoEmailRegisteredErr = errors.New("user has no email")
+
 type Database struct {
 	db *sql.DB
 }
@@ -82,8 +84,43 @@ func (db Database) GetListEmails(id string) (string, []string, error) {
 	return listName, emails, nil
 }
 
-// AddToList will add a user to a list
-func (db Database) AddToList(userID int64, listID string) error {
-	_, err := db.db.Exec("INSERT INTO lists_users_pivot (user_id, list_id) VALUES (?, (SELECT id FROM lists WHERE inline_id = ?))", userID, listID)
-	return err
+// ParticipateOrOptOut will either add a user to a list or remove them from list.
+// Will also return NoEmailRegisteredErr if user does not have an email.
+func (db Database) ParticipateOrOptOut(userID int64, listID string) error {
+	// Start a transaction
+	tx, err := db.db.Begin()
+	if err != nil {
+		return errors.Wrap(err, "cannot start a transaction")
+	}
+	defer tx.Rollback()
+	// Check if user has email
+	var hasEmail bool
+	_ = tx.QueryRow("SELECT email IS NOT NULL FROM users WHERE tg_id = ?", userID).Scan(&hasEmail)
+	if !hasEmail {
+		return NoEmailRegisteredErr
+	}
+	// Try to delete the user from pivot table. If there is at least one row to remove it, then we have opted out
+	// the user. Otherwise, add it to pivot table.
+	result, err := tx.Exec("DELETE FROM lists_users_pivot WHERE user_id = ? AND list_id = (SELECT id FROM lists WHERE inline_id = ?)", userID, listID)
+	if err != nil {
+		return errors.Wrap(err, "cannot delete pivot row")
+	}
+	// Check we should add a new row
+	rowsDeleted, err := result.RowsAffected()
+	if err != nil {
+		return errors.Wrap(err, "cannot check rows effected")
+	}
+	// Add to database if user had no pivot rows
+	if rowsDeleted == 0 {
+		_, err = tx.Exec("INSERT INTO lists_users_pivot (user_id, list_id) VALUES (?, (SELECT id FROM lists WHERE inline_id = ?))", userID, listID)
+		if err != nil {
+			return errors.Wrap(err, "cannot add user to pivot table")
+		}
+	}
+	// Done
+	err = tx.Commit()
+	if err != nil {
+		return errors.Wrap(err, "cannot commit")
+	}
+	return nil
 }
