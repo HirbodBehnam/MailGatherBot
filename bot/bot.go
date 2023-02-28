@@ -31,7 +31,7 @@ func (b *Bot) Start() {
 				if err == database.NoEmailRegisteredErr {
 					_, _ = b.bot.Send(tgbotapi.CallbackConfig{
 						CallbackQueryID: update.CallbackQuery.ID,
-						Text:            "Please enter your email in bot.",
+						URL:             "t.me/" + b.bot.Self.UserName + "?start=email",
 					})
 				} else {
 					// Big fuckup

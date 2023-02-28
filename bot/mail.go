@@ -17,7 +17,7 @@ func (b *Bot) mailChangeRequest(userID int64, message string) {
 		err := b.Database.UpdateEmail(userID, email)
 		if err != nil {
 			log.Printf("cannot set user %d's email address to %s: %s\n", userID, email, err)
-			_, _ = b.bot.Send(tgbotapi.NewMessage(userID, "Cannot set your email"))
+			_, _ = b.bot.Send(tgbotapi.NewMessage(userID, "Cannot set your email."))
 		} else {
 			_, _ = b.bot.Send(tgbotapi.NewMessage(userID, "Changed your email!"))
 		}
@@ -29,9 +29,9 @@ func (b *Bot) mailChangeRequest(userID int64, message string) {
 			_, _ = b.bot.Send(tgbotapi.NewMessage(userID, "Cannot get your email"))
 		} else {
 			if email == "" {
-				_, _ = b.bot.Send(tgbotapi.NewMessage(userID, "You do not have an email address right now!"))
+				_, _ = b.bot.Send(tgbotapi.NewMessage(userID, "You do not have an email address right now! Send your email address to me to set it."))
 			} else {
-				_, _ = b.bot.Send(tgbotapi.NewMessage(userID, "Your email address is "+email))
+				_, _ = b.bot.Send(tgbotapi.NewMessage(userID, "Your email address is "+email+". You can send your email to me if you want to change it."))
 			}
 		}
 	}
