@@ -3,7 +3,6 @@ package bot
 import (
 	"MailGatherBot/database"
 	"MailGatherBot/util"
-	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 )
@@ -26,7 +25,6 @@ func (b *Bot) Start() {
 	updates := b.bot.GetUpdatesChan(u)
 	for update := range updates {
 		if update.CallbackQuery != nil {
-			fmt.Println(update.CallbackQuery)
 			// Add or remove user from list
 			err = b.Database.ParticipateOrOptOut(update.CallbackQuery.From.ID, update.CallbackQuery.Data)
 			if err != nil {

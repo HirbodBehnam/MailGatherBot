@@ -3,6 +3,7 @@ package bot
 import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
+	"strconv"
 	"strings"
 )
 
@@ -29,7 +30,7 @@ func (b *Bot) UpdateList(listID, inlineMessageID string) {
 				},
 			},
 		},
-		Text:      "List of " + title + "\n`" + strings.Join(emails, "\n") + "`",
+		Text:      "List of " + title + "\nParticipants: " + strconv.Itoa(len(emails)) + "\n`" + strings.Join(emails, "\n") + "`",
 		ParseMode: "MarkdownV2",
 	}
 	_, _ = b.bot.Send(edit)
