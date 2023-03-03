@@ -5,6 +5,8 @@ import (
 	"MailGatherBot/database"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
@@ -18,9 +20,19 @@ func main() {
 		log.Fatalf("cannot open database: %s\n", err)
 	}
 	// Create the bot
+	apiToken := os.Getenv("API_TOKEN")
+	if apiToken == "" {
+		log.Fatalln("please provide API_TOKEN as environment variable")
+	}
 	b := bot.Bot{
-		ApiToken: os.Getenv("API_TOKEN"),
+		ApiToken: apiToken,
 		Database: db,
 	}
-	b.Start()
+	go b.Start()
+	// Wait for signal
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	<-sigs
+	log.Println("Shutting down...")
+	b.StopBot()
 }

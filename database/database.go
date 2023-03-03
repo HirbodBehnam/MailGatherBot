@@ -19,7 +19,13 @@ func NewDatabase(filename string) (Database, error) {
 	if err != nil {
 		return Database{}, errors.Wrap(err, "cannot open database")
 	}
-	db.SetMaxOpenConns(1)
+	// Sqlite does not support multi writes but do support multi reads.
+	// The real safe value here is 1 to disallow all concurrent database access.
+	// However, I choose 2 to MAYBE allow 2 reads together.
+	// Database itself do a busy wait on concurrent writes.
+	// Most of our program is write only queries.
+	db.SetMaxOpenConns(2)
+	// Check if database is good
 	err = db.Ping()
 	if err != nil {
 		return Database{}, errors.Wrap(err, "cannot ping database")
