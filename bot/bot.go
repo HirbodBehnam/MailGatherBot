@@ -3,133 +3,143 @@ package bot
 import (
 	"MailGatherBot/database"
 	"MailGatherBot/util"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/callbackquery"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/inlinequery"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/message"
+	"github.com/go-faster/errors"
 	"log"
-	"sync/atomic"
 	"time"
 )
 
 type Bot struct {
 	ApiToken string
 	Database database.Database
-	bot      *tgbotapi.BotAPI
 	// This channel must be closed when bot is done
 	shutdownDone chan struct{}
-	botStopped   atomic.Bool
+	updater      *ext.Updater
 }
 
 func (b *Bot) Start() {
 	// Make stuff ready for shutdown
 	b.shutdownDone = make(chan struct{})
 	defer close(b.shutdownDone)
-	b.botStopped.Store(false)
 	// Start the bot
-	var err error
-	b.bot, err = tgbotapi.NewBotAPI(b.ApiToken)
+	bot, err := gotgbot.NewBot(b.ApiToken, nil)
 	if err != nil {
 		log.Fatal("Cannot initialize the bot: ", err.Error())
 	}
-	log.Println("Bot authorized on account", b.bot.Self.UserName)
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 30
-	updates := b.bot.GetUpdatesChan(u)
-	for update := range updates {
-		// We need this because of this:
-		// https://github.com/go-telegram-bot-api/telegram-bot-api/issues/451
-		if b.botStopped.Load() {
-			break
-		}
-		if update.CallbackQuery != nil {
-			go b.answerCallbackQuery(update.CallbackQuery.From.ID, update.CallbackQuery.Data, update.CallbackQuery.ID, update.CallbackQuery.InlineMessageID)
-			continue
-		}
-		if update.InlineQuery != nil {
-			go b.handleCreateListQuery(update.InlineQuery.Query, update.InlineQuery.ID)
-			continue
-		}
-		// No clue what the hell is this
-		if update.Message == nil {
-			continue
-		}
-		// Check for commands
-		if update.Message.IsCommand() {
-			switch update.Message.Command() {
-			case "about":
-				_, _ = b.bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, aboutMessage))
-				continue
-			case "help":
-				_, _ = b.bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, helpMessage))
-				continue
-			}
-		}
-		// Mail change?
-		go b.mailChangeRequest(update.Message.From.ID, update.Message.Text)
+	log.Println("Bot authorized on account", bot.Username)
+	dispatcher := ext.NewDispatcher(&ext.DispatcherOpts{
+		Error: func(_ *gotgbot.Bot, _ *ext.Context, err error) ext.DispatcherAction {
+			log.Println("An error occurred while handling update: ", err.Error())
+			return ext.DispatcherActionNoop
+		},
+		MaxRoutines: ext.DefaultMaxRoutines,
+	})
+	b.updater = ext.NewUpdater(dispatcher, nil)
+	// Add handlers
+	dispatcher.AddHandler(handlers.NewCommand("about", func(b *gotgbot.Bot, ctx *ext.Context) error {
+		_, err := ctx.EffectiveMessage.Reply(b, aboutMessage, nil)
+		return err
+	}))
+	dispatcher.AddHandler(handlers.NewCommand("help", func(b *gotgbot.Bot, ctx *ext.Context) error {
+		_, err := ctx.EffectiveMessage.Reply(b, helpMessage, nil)
+		return err
+	}))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.All, b.answerCallbackQuery))
+	dispatcher.AddHandler(handlers.NewInlineQuery(inlinequery.All, b.handleCreateListQuery))
+	dispatcher.AddHandler(handlers.NewMessage(message.Text, b.mailChangeRequest))
+	// Wait for updates
+	err = b.updater.StartPolling(bot, &ext.PollingOpts{
+		DropPendingUpdates: true,
+		GetUpdatesOpts: &gotgbot.GetUpdatesOpts{
+			Timeout: 60,
+			RequestOpts: &gotgbot.RequestOpts{
+				Timeout: time.Second * 60,
+			},
+		},
+	})
+	if err != nil {
+		panic("Failed to start polling: " + err.Error())
 	}
+	log.Printf("%s has been started...\n", bot.User.Username)
+
+	// Idle, to keep updates coming in, and avoid bot stopping.
+	b.updater.Idle()
 }
 
 // StopBot will gracefully stop the bot
 func (b *Bot) StopBot() {
-	b.botStopped.Store(true)
-	b.bot.StopReceivingUpdates()
+	_ = b.updater.Stop()
 	<-b.shutdownDone        // wait for event loop to finish
 	time.Sleep(time.Second) // wait for database operations to finish
+	b.Database.Close()
 }
 
 // handleCreateListQuery will create a list for user
-func (b *Bot) handleCreateListQuery(listName, queryID string) {
+func (b *Bot) handleCreateListQuery(bot *gotgbot.Bot, ctx *ext.Context) error {
+	queryID := ctx.InlineQuery.Id
+	listName := ctx.InlineQuery.Query
 	// If list name is empty just ignore it
 	if listName == "" {
-		_, _ = b.bot.Send(tgbotapi.InlineConfig{
-			InlineQueryID: queryID,
-		})
+		_, err := bot.AnswerInlineQuery(queryID, []gotgbot.InlineQueryResult{}, nil)
+		return err
 	}
 	// Create an ID for list
 	listID := util.RandomID()
 	// Create list in database
 	err := b.Database.CreateList(listID, listName)
 	if err != nil {
-		log.Println("cannot create list:", err)
-		return
+		return errors.Wrap(err, "cannot create list")
 	}
 	// Send it to user
-	item := tgbotapi.NewInlineQueryResultArticle(listID, "List of "+listName, "List of "+listName)
-	item.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-		{
+	item := gotgbot.InlineQueryResultArticle{
+		Id:    listID,
+		Title: "List of " + listName,
+		InputMessageContent: gotgbot.InputTextMessageContent{
+			MessageText: "List of " + listName,
+		},
+		ReplyMarkup: &gotgbot.InlineKeyboardMarkup{InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				Text:         messageButtonText,
-				CallbackData: &listID,
+				{
+					Text:         messageButtonText,
+					CallbackData: listID,
+				},
 			},
-		},
-	}}
-	_, _ = b.bot.Send(tgbotapi.InlineConfig{
-		InlineQueryID: queryID,
-		Results: []interface{}{
-			item,
-		},
-		CacheTime:  0,
+		}},
+	}
+	_, err = bot.AnswerInlineQuery(queryID, []gotgbot.InlineQueryResult{item}, &gotgbot.AnswerInlineQueryOpts{
+		CacheTime:  1,
 		IsPersonal: false,
 	})
+	return err
 }
 
-func (b *Bot) answerCallbackQuery(userID int64, listID, queryID, messageID string) {
+func (b *Bot) answerCallbackQuery(bot *gotgbot.Bot, ctx *ext.Context) error {
+	userID := ctx.EffectiveSender.Id()
+	listID, queryID, messageID := ctx.CallbackQuery.Data, ctx.CallbackQuery.Id, ctx.CallbackQuery.InlineMessageId
 	// Add or remove user from list
 	err := b.Database.ParticipateOrOptOut(userID, listID)
 	if err != nil {
-		if err == database.NoEmailRegisteredErr {
-			_, _ = b.bot.Send(tgbotapi.CallbackConfig{
-				CallbackQueryID: queryID,
-				URL:             "t.me/" + b.bot.Self.UserName + "?start=email",
+		if errors.Is(err, database.NoEmailRegisteredErr) {
+			_, err = bot.AnswerCallbackQuery(queryID, &gotgbot.AnswerCallbackQueryOpts{
+				Url: "t.me/" + bot.Username + "?start=email",
 			})
+			return err
 		} else {
 			// Big fuckup
-			log.Printf("cannot process user button click: %s\n", err)
+			return errors.Wrap(err, "cannot process user button click")
 		}
-		return
 	}
 	// Refresh the list
-	b.UpdateList(listID, messageID)
+	err = b.UpdateList(bot, listID, messageID)
+	if err != nil {
+		return errors.Wrap(err, "cannot update list")
+	}
 	// Answer it
-	_, _ = b.bot.Send(tgbotapi.CallbackConfig{
-		CallbackQueryID: queryID,
-	})
+	_, err = bot.AnswerCallbackQuery(queryID, nil)
+	return err
 }

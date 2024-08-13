@@ -49,7 +49,7 @@ func (db Database) UpdateEmail(userID int64, email string) error {
 func (db Database) GetEmail(userID int64) (string, error) {
 	var email string
 	err := db.db.QueryRow("SELECT email FROM users WHERE tg_id=?", userID).Scan(&email)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
 	return email, nil
@@ -129,4 +129,8 @@ func (db Database) ParticipateOrOptOut(userID int64, listID string) error {
 		return errors.Wrap(err, "cannot commit")
 	}
 	return nil
+}
+
+func (db Database) Close() {
+	_ = db.db.Close()
 }

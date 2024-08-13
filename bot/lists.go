@@ -1,37 +1,33 @@
 package bot
 
 import (
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"log"
+	"github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/go-faster/errors"
 	"strconv"
 	"strings"
 )
 
 // UpdateList will refresh a list by its ID
-func (b *Bot) UpdateList(listID, inlineMessageID string) {
+func (b *Bot) UpdateList(bot *gotgbot.Bot, listID, inlineMessageID string) error {
 	// Get the users
 	title, emails, err := b.Database.GetListEmails(listID)
 	if err != nil {
-		log.Printf("cannot get email list of %s: %s\n", listID, err)
-		return
+		return errors.Wrap(err, "cannot get email list of "+listID)
 	}
 	// Edit the list
-	edit := tgbotapi.EditMessageTextConfig{
-		BaseEdit: tgbotapi.BaseEdit{
-			InlineMessageID: inlineMessageID,
-			ReplyMarkup: &tgbotapi.InlineKeyboardMarkup{
-				InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+	_, _, err = bot.EditMessageText("List of "+title+"\nParticipants: "+strconv.Itoa(len(emails))+"\n`"+strings.Join(emails, "\n")+"`", &gotgbot.EditMessageTextOpts{
+		InlineMessageId: inlineMessageID,
+		ParseMode:       gotgbot.ParseModeMarkdownV2,
+		ReplyMarkup: gotgbot.InlineKeyboardMarkup{
+			InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+				{
 					{
-						{
-							Text:         messageButtonText,
-							CallbackData: &listID,
-						},
+						Text:         messageButtonText,
+						CallbackData: listID,
 					},
 				},
 			},
 		},
-		Text:      "List of " + title + "\nParticipants: " + strconv.Itoa(len(emails)) + "\n`" + strings.Join(emails, "\n") + "`",
-		ParseMode: "MarkdownV2",
-	}
-	_, _ = b.bot.Send(edit)
+	})
+	return err
 }
